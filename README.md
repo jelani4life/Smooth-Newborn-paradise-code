@@ -160,3 +160,90 @@ export function useSessionId() {
   }, []);
   return sessionId;
 }
+
+import crypto from "crypto";
+
+export interface KyberEncryptedData {
+  ciphertext: string;
+  encapsulatedKey: string;
+  iv: string;
+  tag: string;
+  encryptionTimeMs?: number;   // NEW
+  decryptionTimeMs?: number;   // NEW
+}
+
+const KYBER_PUBLIC_KEY_HEX =
+  process.env.KYBER_PUBLIC_KEY ?? crypto.randomBytes(32).toString("hex");
+
+const KYBER_PRIVATE_KEY_HEX =
+  process.env.KYBER_PRIVATE_KEY ?? KYBER_PUBLIC_KEY_HEX;
+
+
+// -----------------------------
+// ENCRYPTION WITH TIMER
+// -----------------------------
+export function kyberEncrypt(plaintext: string): KyberEncryptedData {
+  const start = performance.now();   // Start timer
+
+  const sharedSecret = crypto.createHash("sha256")
+    .update(KYBER_PUBLIC_KEY_HEX)
+    .digest();
+
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", sharedSecret, iv);
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
+
+  const tag = cipher.getAuthTag();
+
+  const end = performance.now();     // End timer
+
+  return {
+    ciphertext: encrypted.toString("base64"),
+    encapsulatedKey: Buffer.from(KYBER_PUBLIC_KEY_HEX, "hex").toString("base64"),
+    iv: iv.toString("base64"),
+    tag: tag.toString("base64"),
+    encryptionTimeMs: Number((end - start).toFixed(3)),  // NEW
+  };
+}
+
+
+// -----------------------------
+// DECRYPTION WITH TIMER
+// -----------------------------
+export function kyberDecrypt(data: KyberEncryptedData): string {
+  const start = performance.now();   // Start timer
+
+  const sharedSecret = crypto.createHash("sha256")
+    .update(KYBER_PRIVATE_KEY_HEX)
+    .digest();
+
+  const iv = Buffer.from(data.iv, "base64");
+  const tag = Buffer.from(data.tag, "base64");
+  const ciphertext = Buffer.from(data.ciphertext, "base64");
+
+  const decipher = crypto.createDecipheriv("aes-256-gcm", sharedSecret, iv);
+  decipher.setAuthTag(tag);
+
+  const decrypted = Buffer.concat([
+    decipher.update(ciphertext),
+    decipher.final(),
+  ]).toString("utf8");
+
+  const end = performance.now();     // End timer
+
+  data.decryptionTimeMs = Number((end - start).toFixed(3));  // NEW
+
+  return decrypted;
+}
+
+
+// -----------------------------
+// WRAPPER FOR RESERVATION DATA
+// -----------------------------
+export function encryptReservationData(data: Record<string, unknown>): string {
+  return JSON.stringify(kyberEncrypt(JSON.stringify(data)));
+}
